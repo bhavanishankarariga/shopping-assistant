@@ -1,11 +1,21 @@
 import { useState, useEffect, useCallback } from 'react';
 import { ShoppingBag, Search, Trash2, AlertCircle } from 'lucide-react';
-import { supabase, ShoppingItem, ItemCategory } from './lib/supabase';
+import { ShoppingItem, ItemCategory } from './lib/supabase';
 import { useVoiceRecognition } from './hooks/useVoiceRecognition';
 import { processVoiceCommand, categorizeItem } from './utils/commandProcessor';
 import { VoiceButton } from './components/VoiceButton';
 import { ShoppingItem as ShoppingItemComponent } from './components/ShoppingItem';
 import { Suggestions } from './components/Suggestions';
+import {
+  getItems,
+  saveItems,
+  getCategories,
+  initializeCategories,
+  addItem as addItemToStorage,
+  removeItem as removeItemFromStorage,
+  updateItem as updateItemInStorage,
+  clearAllItems as clearAllItemsFromStorage
+} from './lib/storage';
 
 function App() {
   const [items, setItems] = useState<ShoppingItem[]>([]);
@@ -20,25 +30,15 @@ function App() {
     setTimeout(() => setNotification(''), 3000);
   };
 
-  const loadCategories = useCallback(async () => {
-    const { data } = await supabase
-      .from('item_categories')
-      .select('*');
-    if (data) {
-      setCategories(data);
-    }
+  const loadCategories = useCallback(() => {
+    const cats = initializeCategories();
+    setCategories(cats);
   }, []);
 
-  const loadItems = useCallback(async () => {
+  const loadItems = useCallback(() => {
     setLoading(true);
-    const { data } = await supabase
-      .from('shopping_items')
-      .select('*')
-      .order('created_at', { ascending: false });
-
-    if (data) {
-      setItems(data);
-    }
+    const storedItems = getItems();
+    setItems(storedItems);
     setLoading(false);
   }, []);
 
@@ -47,78 +47,43 @@ function App() {
     loadItems();
   }, [loadCategories, loadItems]);
 
-  const addItem = async (name: string, quantity: number, unit: string) => {
+  const addItem = (name: string, quantity: number, unit: string) => {
     const category = categorizeItem(name, categories);
-
-    const { error } = await supabase
-      .from('shopping_items')
-      .insert([{
-        name,
-        quantity,
-        unit,
-        category
-      }]);
-
-    if (!error) {
-      loadItems();
-      showNotification(`Added ${quantity} ${unit} of ${name}`);
-    }
+    addItemToStorage(name, quantity, unit, category);
+    loadItems();
+    showNotification(`Added ${quantity} ${unit} of ${name}`);
   };
 
-  const removeItem = async (name: string) => {
+  const removeItem = (name: string) => {
     const item = items.find(i => i.name.toLowerCase().includes(name.toLowerCase()));
 
     if (item) {
-      const { error } = await supabase
-        .from('shopping_items')
-        .delete()
-        .eq('id', item.id);
-
-      if (!error) {
-        loadItems();
-        showNotification(`Removed ${item.name}`);
-      }
+      removeItemFromStorage(item.id);
+      loadItems();
+      showNotification(`Removed ${item.name}`);
     } else {
       showNotification('Item not found');
     }
   };
 
-  const toggleItem = async (id: string) => {
+  const toggleItem = (id: string) => {
     const item = items.find(i => i.id === id);
     if (!item) return;
 
-    const { error } = await supabase
-      .from('shopping_items')
-      .update({ is_completed: !item.is_completed })
-      .eq('id', id);
-
-    if (!error) {
-      loadItems();
-    }
+    updateItemInStorage(id, { is_completed: !item.is_completed });
+    loadItems();
   };
 
-  const deleteItem = async (id: string) => {
-    const { error } = await supabase
-      .from('shopping_items')
-      .delete()
-      .eq('id', id);
-
-    if (!error) {
-      loadItems();
-      showNotification('Item deleted');
-    }
+  const deleteItem = (id: string) => {
+    removeItemFromStorage(id);
+    loadItems();
+    showNotification('Item deleted');
   };
 
-  const clearAllItems = async () => {
-    const { error } = await supabase
-      .from('shopping_items')
-      .delete()
-      .neq('id', '00000000-0000-0000-0000-000000000000');
-
-    if (!error) {
-      loadItems();
-      showNotification('All items cleared');
-    }
+  const clearAllItems = () => {
+    clearAllItemsFromStorage();
+    loadItems();
+    showNotification('All items cleared');
   };
 
   const handleVoiceCommand = useCallback((result: { transcript: string }) => {
